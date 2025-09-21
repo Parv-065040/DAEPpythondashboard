@@ -1,55 +1,22 @@
 """
-Bike Sales Dashboard - Streamlit App
-Author: Your Team
-Description: Interactive dashboard for analyzing bike sales data
+Simple Bike Sales Dashboard - Streamlit App (No External Dependencies)
+This version works with only pandas and streamlit built-in charts
 """
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
 
 # ----------------------------
 # Page Configuration
 # ----------------------------
 st.set_page_config(
-    page_title="🚴‍♂️ Bike Sales Analytics",
+    page_title="🚴‍♂️ Bike Sales Dashboard",
     page_icon="🚴‍♂️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# ----------------------------
-# Custom CSS Styling
-# ----------------------------
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .metric-container {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #1f77b4;
-    }
-    .sidebar .sidebar-content {
-        background-color: #fafafa;
-    }
-    .stSelectbox > div > div {
-        background-color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # ----------------------------
 # Data Loading Functions
@@ -93,12 +60,6 @@ def load_data():
             st.info("Available columns: " + ", ".join(df.columns.tolist()))
             return pd.DataFrame()
         
-        # Convert to appropriate data types
-        categorical_cols = ["Store_Location", "Bike_Model", "Customer_Gender", "Payment_Method"]
-        for col in categorical_cols:
-            if col in df.columns:
-                df[col] = df[col].astype("category")
-        
         # Handle missing values
         df = df.dropna(subset=required_columns)
         
@@ -138,7 +99,8 @@ def filter_data(df, locations, models, genders, age_range, revenue_range):
 # ----------------------------
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🚴‍♂️ Bike Sales Analytics Dashboard</h1>', unsafe_allow_html=True)
+    st.title("🚴‍♂️ Bike Sales Analytics Dashboard")
+    st.markdown("---")
     
     # Load data
     with st.spinner("Loading data..."):
@@ -154,24 +116,24 @@ def main():
     # Location filter
     locations = st.sidebar.multiselect(
         "📍 Store Locations",
-        options=sorted(df["Store_Location"].cat.categories),
-        default=sorted(df["Store_Location"].cat.categories)[:5] if len(df["Store_Location"].cat.categories) > 5 else sorted(df["Store_Location"].cat.categories),
+        options=sorted(df["Store_Location"].unique()),
+        default=sorted(df["Store_Location"].unique())[:5] if len(df["Store_Location"].unique()) > 5 else sorted(df["Store_Location"].unique()),
         help="Select one or more store locations"
     )
     
     # Model filter
     models = st.sidebar.multiselect(
         "🚲 Bike Models",
-        options=sorted(df["Bike_Model"].cat.categories),
-        default=sorted(df["Bike_Model"].cat.categories)[:5] if len(df["Bike_Model"].cat.categories) > 5 else sorted(df["Bike_Model"].cat.categories),
+        options=sorted(df["Bike_Model"].unique()),
+        default=sorted(df["Bike_Model"].unique())[:5] if len(df["Bike_Model"].unique()) > 5 else sorted(df["Bike_Model"].unique()),
         help="Select bike models to analyze"
     )
     
     # Gender filter
     genders = st.sidebar.multiselect(
         "👥 Customer Gender",
-        options=sorted(df["Customer_Gender"].cat.categories),
-        default=sorted(df["Customer_Gender"].cat.categories),
+        options=sorted(df["Customer_Gender"].unique()),
+        default=sorted(df["Customer_Gender"].unique()),
         help="Filter by customer gender"
     )
     
@@ -254,111 +216,68 @@ def main():
     
     st.markdown("---")
     
-    # Charts Section
+    # Charts Section using Streamlit's built-in charts
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("### 🏪 Revenue by Store Location")
-        location_revenue = filtered_df.groupby("Store_Location")["Revenue"].sum().sort_values(ascending=True)
+        location_revenue = filtered_df.groupby("Store_Location")["Revenue"].sum().sort_values(ascending=False)
+        st.bar_chart(location_revenue)
         
-        fig_location = px.bar(
-            x=location_revenue.values,
-            y=location_revenue.index,
-            orientation='h',
-            title="Revenue Performance by Location",
-            color=location_revenue.values,
-            color_continuous_scale="Blues"
-        )
-        fig_location.update_layout(
-            xaxis_title="Revenue ($)",
-            yaxis_title="Store Location",
-            showlegend=False,
-            height=400
-        )
-        st.plotly_chart(fig_location, use_container_width=True)
+        # Show top 5 locations
+        st.markdown("**Top 5 Locations:**")
+        for i, (location, revenue) in enumerate(location_revenue.head(5).items(), 1):
+            st.write(f"{i}. {location}: ${revenue:,.0f}")
     
     with col2:
         st.markdown("### 🚲 Top Performing Bike Models")
-        model_revenue = filtered_df.groupby("Bike_Model")["Revenue"].sum().nlargest(10)
+        model_revenue = filtered_df.groupby("Bike_Model")["Revenue"].sum().sort_values(ascending=False).head(10)
+        st.bar_chart(model_revenue)
         
-        fig_model = px.pie(
-            values=model_revenue.values,
-            names=model_revenue.index,
-            title="Revenue Share by Top 10 Bike Models"
-        )
-        fig_model.update_traces(textposition='inside', textinfo='percent+label')
-        fig_model.update_layout(height=400)
-        st.plotly_chart(fig_model, use_container_width=True)
+        # Show top 5 models
+        st.markdown("**Top 5 Models:**")
+        for i, (model, revenue) in enumerate(model_revenue.head(5).items(), 1):
+            st.write(f"{i}. {model}: ${revenue:,.0f}")
     
     # Full width charts
-    st.markdown("### 💳 Revenue Analysis by Payment Method and Bike Model")
-    payment_model_df = filtered_df.groupby(["Payment_Method", "Bike_Model"])["Revenue"].sum().reset_index()
-    top_models_for_payment = payment_model_df.groupby("Bike_Model")["Revenue"].sum().nlargest(8).index
-    payment_model_df = payment_model_df[payment_model_df["Bike_Model"].isin(top_models_for_payment)]
+    st.markdown("### 💳 Revenue by Payment Method")
+    payment_revenue = filtered_df.groupby("Payment_Method")["Revenue"].sum().sort_values(ascending=False)
+    st.bar_chart(payment_revenue)
     
-    fig_payment = px.bar(
-        payment_model_df,
-        x="Payment_Method",
-        y="Revenue",
-        color="Bike_Model",
-        title="Revenue by Payment Method and Bike Model (Top 8 Models)",
-        text_auto=True,
-        color_discrete_sequence=px.colors.qualitative.Set3
-    )
-    fig_payment.update_layout(height=500, xaxis_tickangle=-45)
-    st.plotly_chart(fig_payment, use_container_width=True)
-    
-    # Age analysis
+    # Age and Gender Analysis
     st.markdown("### 👥 Customer Demographics Analysis")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        age_gender_revenue = filtered_df.groupby(["Age_Group", "Customer_Gender"])["Revenue"].sum().reset_index()
-        
-        fig_age = px.bar(
-            age_gender_revenue,
-            x="Age_Group",
-            y="Revenue",
-            color="Customer_Gender",
-            title="Revenue by Age Group and Gender",
-            barmode="group"
-        )
-        fig_age.update_layout(height=400)
-        st.plotly_chart(fig_age, use_container_width=True)
+        st.markdown("#### Revenue by Age Group")
+        age_revenue = filtered_df.groupby("Age_Group")["Revenue"].sum()
+        st.bar_chart(age_revenue)
     
     with col2:
-        revenue_dist = filtered_df["Revenue_Category"].value_counts()
-        
-        fig_rev_cat = px.bar(
-            x=revenue_dist.index,
-            y=revenue_dist.values,
-            title="Distribution of Revenue Categories",
-            color=revenue_dist.values,
-            color_continuous_scale="Viridis"
-        )
-        fig_rev_cat.update_layout(
-            xaxis_title="Revenue Category",
-            yaxis_title="Number of Orders",
-            showlegend=False,
-            height=400
-        )
-        st.plotly_chart(fig_rev_cat, use_container_width=True)
+        st.markdown("#### Revenue by Gender")
+        gender_revenue = filtered_df.groupby("Customer_Gender")["Revenue"].sum()
+        st.bar_chart(gender_revenue)
     
-    # Heatmap
-    st.markdown("### 🔥 Revenue Heatmap: Store vs Payment Method")
-    heatmap_data = filtered_df.groupby(["Store_Location", "Payment_Method"])["Revenue"].sum().unstack(fill_value=0)
+    # Revenue Categories
+    st.markdown("### 💰 Revenue Categories Distribution")
+    revenue_dist = filtered_df["Revenue_Category"].value_counts()
+    st.bar_chart(revenue_dist)
     
-    fig_heatmap = px.imshow(
-        heatmap_data.values,
-        x=heatmap_data.columns,
-        y=heatmap_data.index,
-        color_continuous_scale="Viridis",
-        aspect="auto",
-        title="Revenue Intensity by Store and Payment Method"
-    )
-    fig_heatmap.update_layout(height=500)
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+    # Summary Tables
+    st.markdown("### 📋 Summary Tables")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### Revenue by Store and Payment Method")
+        summary_table = filtered_df.groupby(["Store_Location", "Payment_Method"])["Revenue"].sum().unstack(fill_value=0)
+        st.dataframe(summary_table, use_container_width=True)
+    
+    with col2:
+        st.markdown("#### Average Revenue by Age Group and Gender")
+        age_gender_avg = filtered_df.groupby(["Age_Group", "Customer_Gender"])["Revenue"].mean().unstack(fill_value=0)
+        st.dataframe(age_gender_avg.round(2), use_container_width=True)
     
     # Data Table
     with st.expander("📋 View Filtered Data"):
@@ -392,7 +311,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 20px;'>
-        <p>🚴‍♂️ <strong>Bike Sales Analytics Dashboard</strong> | Built with Streamlit & Plotly</p>
+        <p>🚴‍♂️ <strong>Bike Sales Analytics Dashboard</strong> | Built with Streamlit</p>
         <p>Last updated: {}</p>
     </div>
     """.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")), unsafe_allow_html=True)
