@@ -2,7 +2,6 @@
 Simple Bike Sales Dashboard - Streamlit App (No External Dependencies)
 This version works with only pandas and streamlit built-in charts
 """
-
 import streamlit as st
 import pandas as pd
 import numpy as np
