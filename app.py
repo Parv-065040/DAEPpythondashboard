@@ -1,163 +1,401 @@
+"""
+Bike Sales Dashboard - Streamlit App
+Author: Your Team
+Description: Interactive dashboard for analyzing bike sales data
+"""
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import matplotlib.pyplot as plt
-import joypy
+import numpy as np
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title='Bike Sales Dashboard', layout='wide')
+# ----------------------------
+# Page Configuration
+# ----------------------------
+st.set_page_config(
+    page_title="🚴‍♂️ Bike Sales Analytics",
+    page_icon="🚴‍♂️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ----------------------------
+# Custom CSS Styling
+# ----------------------------
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-container {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #1f77b4;
+    }
+    .sidebar .sidebar-content {
+        background-color: #fafafa;
+    }
+    .stSelectbox > div > div {
+        background-color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ----------------------------
+# Data Loading Functions
+# ----------------------------
+@st.cache_data
+def load_data():
+    """Load and preprocess the bike sales data"""
+    try:
+        # Try multiple possible file paths
+        possible_paths = [
+            "clean_bike_sales.csv",
+            "data/clean_bike_sales.csv",
+            "./clean_bike_sales.csv",
+            "/content/drive/MyDrive/Colab Notebooks/clean_bike_sales.csv"
+        ]
+        
+        df = None
+        for path in possible_paths:
+            try:
+                df = pd.read_csv(path)
+                st.success(f"✅ Data loaded successfully from: {path}")
+                break
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                st.error(f"Error reading {path}: {str(e)}")
+                continue
+        
+        if df is None:
+            st.error("❌ CSV file not found in any of the expected locations.")
+            st.info("Please ensure 'clean_bike_sales.csv' is in the same directory as app.py")
+            return pd.DataFrame()
+        
+        # Data preprocessing
+        required_columns = ["Store_Location", "Bike_Model", "Customer_Gender", "Customer_Age", "Revenue", "Payment_Method"]
+        
+        # Check if all required columns exist
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            st.error(f"❌ Missing columns in dataset: {missing_cols}")
+            st.info("Available columns: " + ", ".join(df.columns.tolist()))
+            return pd.DataFrame()
+        
+        # Convert to appropriate data types
+        categorical_cols = ["Store_Location", "Bike_Model", "Customer_Gender", "Payment_Method"]
+        for col in categorical_cols:
+            if col in df.columns:
+                df[col] = df[col].astype("category")
+        
+        # Handle missing values
+        df = df.dropna(subset=required_columns)
+        
+        # Add derived columns
+        df['Revenue_Category'] = pd.cut(df['Revenue'], 
+                                       bins=[0, 1000, 5000, 10000, float('inf')], 
+                                       labels=['Low', 'Medium', 'High', 'Premium'])
+        
+        df['Age_Group'] = pd.cut(df['Customer_Age'], 
+                                bins=[0, 25, 35, 45, 55, 100], 
+                                labels=['18-25', '26-35', '36-45', '46-55', '55+'])
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Unexpected error loading data: {str(e)}")
+        return pd.DataFrame()
 
 @st.cache_data
-def load_data(path):
-    df = pd.read_csv(path)
-    df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-    df['Revenue'] = df['Price'] * df['Quantity']
-    return df
+def filter_data(df, locations, models, genders, age_range, revenue_range):
+    """Filter data based on user selections"""
+    if df.empty:
+        return df
+        
+    filtered_df = df[
+        (df["Store_Location"].isin(locations)) &
+        (df["Bike_Model"].isin(models)) &
+        (df["Customer_Gender"].isin(genders)) &
+        (df["Customer_Age"].between(age_range[0], age_range[1])) &
+        (df["Revenue"].between(revenue_range[0], revenue_range[1]))
+    ].copy()
+    
+    return filtered_df
 
-# === Load data (adjust path if necessary) ===
-DATA_PATH = 'clean_bike_sales.csv'  # or full path if different
-try:
-    df = load_data(DATA_PATH)
-except FileNotFoundError:
-    st.error(f"Data file not found at {DATA_PATH}. Upload it or update DATA_PATH.")
-    st.stop()
+# ----------------------------
+# Main App
+# ----------------------------
+def main():
+    # Header
+    st.markdown('<h1 class="main-header">🚴‍♂️ Bike Sales Analytics Dashboard</h1>', unsafe_allow_html=True)
+    
+    # Load data
+    with st.spinner("Loading data..."):
+        df = load_data()
+    
+    if df.empty:
+        st.stop()
+    
+    # Sidebar Filters
+    st.sidebar.header("🔍 Filter Dashboard")
+    st.sidebar.markdown("---")
+    
+    # Location filter
+    locations = st.sidebar.multiselect(
+        "📍 Store Locations",
+        options=sorted(df["Store_Location"].cat.categories),
+        default=sorted(df["Store_Location"].cat.categories)[:5] if len(df["Store_Location"].cat.categories) > 5 else sorted(df["Store_Location"].cat.categories),
+        help="Select one or more store locations"
+    )
+    
+    # Model filter
+    models = st.sidebar.multiselect(
+        "🚲 Bike Models",
+        options=sorted(df["Bike_Model"].cat.categories),
+        default=sorted(df["Bike_Model"].cat.categories)[:5] if len(df["Bike_Model"].cat.categories) > 5 else sorted(df["Bike_Model"].cat.categories),
+        help="Select bike models to analyze"
+    )
+    
+    # Gender filter
+    genders = st.sidebar.multiselect(
+        "👥 Customer Gender",
+        options=sorted(df["Customer_Gender"].cat.categories),
+        default=sorted(df["Customer_Gender"].cat.categories),
+        help="Filter by customer gender"
+    )
+    
+    # Age range filter
+    min_age, max_age = int(df["Customer_Age"].min()), int(df["Customer_Age"].max())
+    age_range = st.sidebar.slider(
+        "🎂 Customer Age Range",
+        min_value=min_age,
+        max_value=max_age,
+        value=(min_age, max_age),
+        help="Select age range for customers"
+    )
+    
+    # Revenue range filter
+    min_rev, max_rev = float(df["Revenue"].min()), float(df["Revenue"].max())
+    revenue_range = st.sidebar.slider(
+        "💰 Revenue Range ($)",
+        min_value=min_rev,
+        max_value=max_rev,
+        value=(min_rev, max_rev),
+        format="$%.0f",
+        help="Filter by revenue range"
+    )
+    
+    # Apply filters
+    filtered_df = filter_data(df, locations, models, genders, age_range, revenue_range)
+    
+    if filtered_df.empty:
+        st.warning("⚠️ No data matches your current filters. Please adjust your selections.")
+        st.stop()
+    
+    # Display data info
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📊 Data Summary")
+    st.sidebar.info(f"""
+    **Original Dataset**: {len(df):,} records
+    **Filtered Dataset**: {len(filtered_df):,} records
+    **Reduction**: {((len(df) - len(filtered_df)) / len(df) * 100):.1f}%
+    """)
+    
+    # Main Dashboard
+    # Key Metrics Row
+    st.markdown("### 📈 Key Performance Indicators")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_revenue = filtered_df['Revenue'].sum()
+        st.metric(
+            "Total Revenue",
+            f"${total_revenue:,.0f}",
+            delta=f"${total_revenue/len(filtered_df):.0f} avg per sale"
+        )
+    
+    with col2:
+        total_orders = len(filtered_df)
+        avg_orders_per_location = total_orders / len(locations) if locations else 0
+        st.metric(
+            "Total Orders",
+            f"{total_orders:,}",
+            delta=f"{avg_orders_per_location:.0f} per location"
+        )
+    
+    with col3:
+        avg_revenue = filtered_df['Revenue'].mean()
+        median_revenue = filtered_df['Revenue'].median()
+        st.metric(
+            "Average Revenue",
+            f"${avg_revenue:.2f}",
+            delta=f"${median_revenue:.0f} median"
+        )
+    
+    with col4:
+        unique_customers = filtered_df['Customer_Age'].nunique()
+        customer_retention = (total_orders / unique_customers) if unique_customers > 0 else 0
+        st.metric(
+            "Customer Segments",
+            f"{unique_customers:,}",
+            delta=f"{customer_retention:.1f} orders per segment"
+        )
+    
+    st.markdown("---")
+    
+    # Charts Section
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 🏪 Revenue by Store Location")
+        location_revenue = filtered_df.groupby("Store_Location")["Revenue"].sum().sort_values(ascending=True)
+        
+        fig_location = px.bar(
+            x=location_revenue.values,
+            y=location_revenue.index,
+            orientation='h',
+            title="Revenue Performance by Location",
+            color=location_revenue.values,
+            color_continuous_scale="Blues"
+        )
+        fig_location.update_layout(
+            xaxis_title="Revenue ($)",
+            yaxis_title="Store Location",
+            showlegend=False,
+            height=400
+        )
+        st.plotly_chart(fig_location, use_container_width=True)
+    
+    with col2:
+        st.markdown("### 🚲 Top Performing Bike Models")
+        model_revenue = filtered_df.groupby("Bike_Model")["Revenue"].sum().nlargest(10)
+        
+        fig_model = px.pie(
+            values=model_revenue.values,
+            names=model_revenue.index,
+            title="Revenue Share by Top 10 Bike Models"
+        )
+        fig_model.update_traces(textposition='inside', textinfo='percent+label')
+        fig_model.update_layout(height=400)
+        st.plotly_chart(fig_model, use_container_width=True)
+    
+    # Full width charts
+    st.markdown("### 💳 Revenue Analysis by Payment Method and Bike Model")
+    payment_model_df = filtered_df.groupby(["Payment_Method", "Bike_Model"])["Revenue"].sum().reset_index()
+    top_models_for_payment = payment_model_df.groupby("Bike_Model")["Revenue"].sum().nlargest(8).index
+    payment_model_df = payment_model_df[payment_model_df["Bike_Model"].isin(top_models_for_payment)]
+    
+    fig_payment = px.bar(
+        payment_model_df,
+        x="Payment_Method",
+        y="Revenue",
+        color="Bike_Model",
+        title="Revenue by Payment Method and Bike Model (Top 8 Models)",
+        text_auto=True,
+        color_discrete_sequence=px.colors.qualitative.Set3
+    )
+    fig_payment.update_layout(height=500, xaxis_tickangle=-45)
+    st.plotly_chart(fig_payment, use_container_width=True)
+    
+    # Age analysis
+    st.markdown("### 👥 Customer Demographics Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        age_gender_revenue = filtered_df.groupby(["Age_Group", "Customer_Gender"])["Revenue"].sum().reset_index()
+        
+        fig_age = px.bar(
+            age_gender_revenue,
+            x="Age_Group",
+            y="Revenue",
+            color="Customer_Gender",
+            title="Revenue by Age Group and Gender",
+            barmode="group"
+        )
+        fig_age.update_layout(height=400)
+        st.plotly_chart(fig_age, use_container_width=True)
+    
+    with col2:
+        revenue_dist = filtered_df["Revenue_Category"].value_counts()
+        
+        fig_rev_cat = px.bar(
+            x=revenue_dist.index,
+            y=revenue_dist.values,
+            title="Distribution of Revenue Categories",
+            color=revenue_dist.values,
+            color_continuous_scale="Viridis"
+        )
+        fig_rev_cat.update_layout(
+            xaxis_title="Revenue Category",
+            yaxis_title="Number of Orders",
+            showlegend=False,
+            height=400
+        )
+        st.plotly_chart(fig_rev_cat, use_container_width=True)
+    
+    # Heatmap
+    st.markdown("### 🔥 Revenue Heatmap: Store vs Payment Method")
+    heatmap_data = filtered_df.groupby(["Store_Location", "Payment_Method"])["Revenue"].sum().unstack(fill_value=0)
+    
+    fig_heatmap = px.imshow(
+        heatmap_data.values,
+        x=heatmap_data.columns,
+        y=heatmap_data.index,
+        color_continuous_scale="Viridis",
+        aspect="auto",
+        title="Revenue Intensity by Store and Payment Method"
+    )
+    fig_heatmap.update_layout(height=500)
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+    
+    # Data Table
+    with st.expander("📋 View Filtered Data"):
+        st.markdown("### Detailed Data View")
+        
+        # Add some statistics about the filtered data
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Rows Displayed", len(filtered_df))
+        with col2:
+            st.metric("Columns", len(filtered_df.columns))
+        with col3:
+            st.metric("Data Size", f"{filtered_df.memory_usage(deep=True).sum() / 1024:.1f} KB")
+        
+        # Display the dataframe
+        st.dataframe(
+            filtered_df.head(1000),  # Limit to first 1000 rows for performance
+            use_container_width=True
+        )
+        
+        # Download button
+        csv = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Filtered Data as CSV",
+            data=csv,
+            file_name=f"filtered_bike_sales_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #666; padding: 20px;'>
+        <p>🚴‍♂️ <strong>Bike Sales Analytics Dashboard</strong> | Built with Streamlit & Plotly</p>
+        <p>Last updated: {}</p>
+    </div>
+    """.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")), unsafe_allow_html=True)
 
-# === Sidebar filters ===
-st.sidebar.header('Filters')
-min_date = df['Date'].min()
-max_date = df['Date'].max()
-start, end = st.sidebar.date_input('Date range', value=(min_date, max_date))
-
-models = ['All'] + sorted(df['Bike_Model'].unique().tolist())
-selected_model = st.sidebar.selectbox('Bike Model', models)
-
-stores = ['All'] + sorted(df['Store_Location'].unique().tolist())
-selected_store = st.sidebar.selectbox('Store Location', stores)
-
-payments = ['All'] + sorted(df['Payment_Method'].unique().tolist())
-selected_payment = st.sidebar.selectbox('Payment Method', payments)
-
-age_min, age_max = int(df['Customer_Age'].min()), int(df['Customer_Age'].max())
-age_range = st.sidebar.slider('Customer age', age_min, age_max, (age_min, age_max))
-
-genders = ['All'] + sorted(df['Customer_Gender'].dropna().unique().tolist())
-selected_gender = st.sidebar.selectbox('Customer gender', genders)
-
-# apply filters
-mask = (df['Date'] >= pd.to_datetime(start)) & (df['Date'] <= pd.to_datetime(end))
-if selected_model != 'All':
-    mask &= (df['Bike_Model'] == selected_model)
-if selected_store != 'All':
-    mask &= (df['Store_Location'] == selected_store)
-if selected_payment != 'All':
-    mask &= (df['Payment_Method'] == selected_payment)
-mask &= df['Customer_Age'].between(age_range[0], age_range[1])
-if selected_gender != 'All':
-    mask &= (df['Customer_Gender'] == selected_gender)
-
-filtered = df[mask].copy()
-
-# === Top-level KPIs ===
-col1, col2, col3, col4 = st.columns(4)
-col1.metric('Total revenue', f"${filtered['Revenue'].sum():,.0f}")
-col2.metric('Total units sold', int(filtered['Quantity'].sum()))
-col3.metric('Average price', f"${filtered['Price'].mean():.2f}")
-col4.metric('Unique customers', int(filtered['Customer_ID'].nunique()))
-
-# === Tabs for sections ===
-tab1, tab2, tab3, tab4 = st.tabs(['Overview', 'Product Analysis', 'Customer Analysis', 'Advanced Visuals'])
-
-with tab1:
-    st.header('Sales over time')
-    ts = filtered.set_index('Date').resample('M')['Revenue'].sum().reset_index()
-    fig = px.line(ts, x='Date', y='Revenue', title='Monthly revenue')
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.header('Revenue by Store and Model')
-    fig2 = px.sunburst(filtered, path=['Store_Location', 'Bike_Model'], values='Revenue', title='Store → Bike Model → Revenue')
-    st.plotly_chart(fig2, use_container_width=True)
-
-with tab2:
-    st.header('Top bike models')
-    top_models = filtered.groupby('Bike_Model').agg({'Revenue': 'sum', 'Quantity': 'sum'}).reset_index().sort_values('Revenue', ascending=False)
-    st.dataframe(top_models.head(10))
-
-    st.subheader('Price distribution by model')
-    fig_violin = px.violin(filtered, x='Bike_Model', y='Price', box=True, points='all', title='Price distribution per model')
-    st.plotly_chart(fig_violin, use_container_width=True)
-
-with tab3:
-    st.header('Customer age vs purchase behavior')
-    fig_scatter = px.scatter(filtered, x='Customer_Age', y='Revenue', size='Quantity', color='Bike_Model', hover_data=['Customer_ID'], title='Age vs Revenue (bubble = quantity)')
-    st.plotly_chart(fig_scatter, use_container_width=True)
-
-    st.subheader('Parallel coordinates (numerical features)')
-    # choose numeric columns for parallel coords
-    num_cols = ['Price', 'Quantity', 'Customer_Age', 'Revenue']
-    try:
-        fig_pc = px.parallel_coordinates(filtered.sample(min(1000, len(filtered))), dimensions=num_cols, color='Price')
-        st.plotly_chart(fig_pc, use_container_width=True)
-    except Exception as e:
-        st.warning('Parallel coordinates failed: ' + str(e))
-
-with tab4:
-    st.header('Sankey: Store -> Payment -> Bike Model')
-    # Build sankey
-    try:
-        src = filtered['Store_Location'].astype(str)
-        mid = filtered['Payment_Method'].astype(str)
-        dst = filtered['Bike_Model'].astype(str)
-
-        labels = list(pd.concat([src, mid, dst]).unique())
-        label_index = {l: i for i, l in enumerate(labels)}
-
-        # Source -> middle
-        s = src.map(label_index)
-        t = mid.map(label_index)
-        v = filtered.groupby([src, mid]).size().values
-        # We'll build edges by grouping explicitly
-        link_source = []
-        link_target = []
-        link_value = []
-        g1 = filtered.groupby(['Store_Location', 'Payment_Method']).size().reset_index(name='count')
-        for _, r in g1.iterrows():
-            link_source.append(label_index[r['Store_Location']])
-            link_target.append(label_index[r['Payment_Method']])
-            link_value.append(r['count'])
-        g2 = filtered.groupby(['Payment_Method', 'Bike_Model']).size().reset_index(name='count')
-        for _, r in g2.iterrows():
-            link_source.append(label_index[r['Payment_Method']])
-            link_target.append(label_index[r['Bike_Model']])
-            link_value.append(r['count'])
-
-        sankey = go.Figure(data=[go.Sankey(node={'label': labels}, link={'source': link_source, 'target': link_target, 'value': link_value})])
-        sankey.update_layout(title_text='Sankey: Store → Payment → Bike Model', font_size=10)
-        st.plotly_chart(sankey, use_container_width=True)
-    except Exception as e:
-        st.warning('Could not build Sankey: ' + str(e))
-
-    st.subheader('3D scatter: Price, Quantity, Customer_Age')
-    try:
-        fig3d = px.scatter_3d(filtered.sample(min(2000, len(filtered))), x='Price', y='Quantity', z='Customer_Age', color='Bike_Model', size='Revenue', title='3D scatter')
-        st.plotly_chart(fig3d, use_container_width=True)
-    except Exception as e:
-        st.warning('3D scatter failed: ' + str(e))
-
-    st.subheader('Ridgeline (price distribution by model)')
-    try:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        # prepare data for joyful ridgeline: group price arrays by model
-        subset = filtered[['Bike_Model', 'Price']].dropna()
-        # sample to keep plot readable
-        sample = subset.groupby('Bike_Model').apply(lambda x: x.sample(min(500, len(x)), random_state=1)).reset_index(drop=True)
-        joypy.joyplot(sample, by='Bike_Model', column='Price', ax=ax)
-        st.pyplot(fig)
-    except Exception as e:
-        st.warning('Ridgeline failed (requires joypy & matplotlib): ' + str(e))
-
-# Footer
-st.markdown('---')
-st.caption('Dashboard generated with Streamlit + Plotly')
+if __name__ == "__main__":
+    main()
